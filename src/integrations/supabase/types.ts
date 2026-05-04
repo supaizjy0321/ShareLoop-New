@@ -16,29 +16,38 @@ export type Database = {
     Tables: {
       businesses: {
         Row: {
+          address: string | null
           category: string
           created_at: string
           description: string | null
           id: string
+          latitude: number | null
           logo_url: string | null
+          longitude: number | null
           name: string
           owner_id: string
         }
         Insert: {
+          address?: string | null
           category: string
           created_at?: string
           description?: string | null
           id?: string
+          latitude?: number | null
           logo_url?: string | null
+          longitude?: number | null
           name: string
           owner_id: string
         }
         Update: {
+          address?: string | null
           category?: string
           created_at?: string
           description?: string | null
           id?: string
+          latitude?: number | null
           logo_url?: string | null
+          longitude?: number | null
           name?: string
           owner_id?: string
         }
@@ -61,6 +70,7 @@ export type Database = {
           image_url: string | null
           name: string
           price: number
+          quantity: number
         }
         Insert: {
           business_id: string
@@ -70,6 +80,7 @@ export type Database = {
           image_url?: string | null
           name: string
           price?: number
+          quantity?: number
         }
         Update: {
           business_id?: string
@@ -79,6 +90,7 @@ export type Database = {
           image_url?: string | null
           name?: string
           price?: number
+          quantity?: number
         }
         Relationships: [
           {
@@ -92,21 +104,30 @@ export type Database = {
       }
       profiles: {
         Row: {
+          address: string | null
           created_at: string
           full_name: string
           id: string
+          latitude: number | null
+          longitude: number | null
           role: string
         }
         Insert: {
+          address?: string | null
           created_at?: string
           full_name: string
           id: string
+          latitude?: number | null
+          longitude?: number | null
           role: string
         }
         Update: {
+          address?: string | null
           created_at?: string
           full_name?: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           role?: string
         }
         Relationships: []
@@ -119,6 +140,7 @@ export type Database = {
           id: string
           pickup_time: string
           product_id: string
+          quantity: number
           status: string
         }
         Insert: {
@@ -128,6 +150,7 @@ export type Database = {
           id?: string
           pickup_time: string
           product_id: string
+          quantity?: number
           status?: string
         }
         Update: {
@@ -137,6 +160,7 @@ export type Database = {
           id?: string
           pickup_time?: string
           product_id?: string
+          quantity?: number
           status?: string
         }
         Relationships: [

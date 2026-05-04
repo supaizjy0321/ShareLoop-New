@@ -9,6 +9,9 @@ export interface Business {
   owner_id: string;
   description?: string;
   logo_url?: string | null;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface Product {
@@ -18,6 +21,7 @@ export interface Product {
   business_id: string;
   description?: string;
   image_url?: string | null;
+  quantity?: number;
 }
 
 export interface Reservation {
@@ -27,6 +31,7 @@ export interface Reservation {
   business_id: string;
   product_id: string;
   product_name: string;
+  quantity: number;
   pickup_time: string;
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
@@ -64,11 +69,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await Promise.all([
         supabase
           .from('businesses')
-          .select('id, name, category, owner_id, description, logo_url')
+          .select('id, name, category, owner_id, description, logo_url, address, latitude, longitude')
           .order('created_at', { ascending: false }),
         supabase
           .from('products')
-          .select('id, name, price, business_id, description, image_url')
+          .select('id, name, price, business_id, description, image_url, quantity')
           .order('created_at', { ascending: false }),
         supabase
           .from('reservations')
@@ -77,6 +82,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             customer_id,
             business_id,
             product_id,
+            quantity,
             pickup_time,
             status,
             created_at,
@@ -94,11 +100,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...b,
       description: b.description ?? undefined,
       logo_url: b.logo_url ?? null,
+      address: b.address ?? null,
+      latitude: b.latitude ?? null,
+      longitude: b.longitude ?? null,
     })));
     setProducts((productsData ?? []).map(p => ({
       ...p,
       description: p.description ?? undefined,
       image_url: p.image_url ?? null,
+      quantity: p.quantity ?? 0,
     })));
     setReservations((reservationsData ?? []).map(r => ({
       id: r.id,
@@ -107,6 +117,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       business_id: r.business_id,
       product_id: r.product_id,
       product_name: (r as any).products?.name ?? 'Product',
+      quantity: r.quantity ?? 1,
       pickup_time: r.pickup_time,
       status: r.status as Reservation['status'],
       created_at: r.created_at,
@@ -126,8 +137,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         owner_id: b.owner_id,
         description: b.description ?? null,
         logo_url: b.logo_url ?? null,
+        address: b.address ?? null,
+        latitude: b.latitude ?? null,
+        longitude: b.longitude ?? null,
       })
-      .select('id, name, category, owner_id, description, logo_url')
+      .select('id, name, category, owner_id, description, logo_url, address, latitude, longitude')
       .single();
 
     if (error) throw error;
@@ -135,6 +149,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...data,
       description: data.description ?? undefined,
       logo_url: data.logo_url ?? null,
+      address: data.address ?? null,
+      latitude: data.latitude ?? null,
+      longitude: data.longitude ?? null,
     };
     setBusinesses(prev => [mapped, ...prev]);
     return mapped;
@@ -148,6 +165,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         category: b.category,
         description: b.description === undefined ? undefined : (b.description ?? null),
         logo_url: b.logo_url === undefined ? undefined : (b.logo_url ?? null),
+        address: b.address === undefined ? undefined : (b.address ?? null),
+        latitude: b.latitude === undefined ? undefined : (b.latitude ?? null),
+        longitude: b.longitude === undefined ? undefined : (b.longitude ?? null),
       })
       .eq('id', id);
 
@@ -164,8 +184,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         business_id: p.business_id,
         description: p.description ?? null,
         image_url: p.image_url ?? null,
+        quantity: p.quantity ?? 0,
       })
-      .select('id, name, price, business_id, description, image_url')
+      .select('id, name, price, business_id, description, image_url, quantity')
       .single();
 
     if (error) throw error;
@@ -173,6 +194,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...data,
       description: data.description ?? undefined,
       image_url: data.image_url ?? null,
+      quantity: data.quantity ?? 0,
     }, ...prev]);
   }, []);
 
@@ -190,12 +212,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         business_id: r.business_id,
         product_id: r.product_id,
         pickup_time: r.pickup_time,
+        quantity: r.quantity ?? 1,
       })
       .select(`
         id,
         customer_id,
         business_id,
         product_id,
+        quantity,
         pickup_time,
         status,
         created_at,
@@ -212,6 +236,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       business_id: data.business_id,
       product_id: data.product_id,
       product_name: (data as any).products?.name ?? 'Product',
+      quantity: data.quantity ?? 1,
       pickup_time: data.pickup_time,
       status: data.status as Reservation['status'],
       created_at: data.created_at,
@@ -220,13 +245,52 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const updateReservationStatus = useCallback(async (id: string, status: 'approved' | 'rejected') => {
-    const { error } = await supabase
-      .from('reservations')
-      .update({ status })
-      .eq('id', id);
+    let productId: string | undefined;
+    let orderQty = 1;
 
+    if (status === 'approved') {
+      const { data: resRow, error: resErr } = await supabase
+        .from('reservations')
+        .select('product_id, quantity')
+        .eq('id', id)
+        .single();
+      if (resErr || !resRow) throw resErr ?? new Error('Reservation not found');
+      productId = resRow.product_id;
+      orderQty = resRow.quantity ?? 1;
+      const { data: prod, error: prodErr } = await supabase
+        .from('products')
+        .select('quantity')
+        .eq('id', productId)
+        .single();
+      if (prodErr || !prod) throw prodErr ?? new Error('Product not found');
+      if ((prod.quantity ?? 0) < orderQty) {
+        throw new Error('Not enough stock to approve this reservation.');
+      }
+    }
+
+    const { error } = await supabase.from('reservations').update({ status }).eq('id', id);
     if (error) throw error;
-    setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+
+    if (status === 'approved' && productId) {
+      const { data: prod } = await supabase
+        .from('products')
+        .select('quantity')
+        .eq('id', productId)
+        .single();
+      const newStock = Math.max(0, (prod?.quantity ?? 0) - orderQty);
+      const { error: stockErr } = await supabase
+        .from('products')
+        .update({ quantity: newStock })
+        .eq('id', productId);
+      if (stockErr) throw stockErr;
+      setProducts(prev =>
+        prev.map(p => (p.id === productId ? { ...p, quantity: newStock } : p)),
+      );
+    }
+
+    setReservations(prev =>
+      prev.map(r => (r.id === id ? { ...r, status } : r)),
+    );
   }, []);
 
   const value = useMemo(() => ({

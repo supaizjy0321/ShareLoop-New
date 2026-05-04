@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData, type Product } from '@/contexts/DataContext';
@@ -10,12 +10,14 @@ import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Coffee, Scissors, Wrench, MapPin, Clock, CalendarIcon, ArrowLeft, ShoppingBag, LogOut, Heart, LayoutDashboard } from 'lucide-react';
+import { Coffee, Scissors, Wrench, MapPin, CalendarIcon, ArrowLeft, ShoppingBag, LogOut, Heart, LayoutDashboard } from 'lucide-react';
+import { LocationMap } from '@/components/LocationMap';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
+import { format, isBefore, startOfDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ProductCard } from '@/components/ProductCard';
+import { formatDistance, hasCoords, haversineKm } from '@/lib/geo';
 
 const CATEGORY_DEFINITIONS = [
   { name: 'Cafés & Bakeries', icon: Coffee },
@@ -31,6 +33,14 @@ const ExplorePage = () => {
   const [bookingProduct, setBookingProduct] = useState<Product | null>(null);
   const [bookingDate, setBookingDate] = useState<Date>();
   const [bookingTime, setBookingTime] = useState('10:00');
+  const [bookingQty, setBookingQty] = useState(1);
+
+  const customerPoint = useMemo(() => (hasCoords(user) ? user : null), [user]);
+
+  const distanceTo = (b: { latitude?: number | null; longitude?: number | null }) => {
+    if (!customerPoint || !hasCoords(b)) return null;
+    return haversineKm(customerPoint, b);
+  };
 
   // Categories are "active" only when a vendor has actually added a business in them.
   const categories = useMemo(
@@ -44,25 +54,53 @@ const ExplorePage = () => {
 
   const activeBusiness = businesses.find(b => b.id === selectedBusiness);
   const businessProducts = products.filter(p => p.business_id === selectedBusiness);
-  const categoryBusinesses = businesses.filter(b => b.category === selectedCategory);
+  const categoryBusinesses = useMemo(() => {
+    const list = businesses.filter(b => b.category === selectedCategory);
+    if (!customerPoint) return list;
+    return [...list].sort((a, b) => {
+      const da = distanceTo(a);
+      const db = distanceTo(b);
+      if (da === null && db === null) return 0;
+      if (da === null) return 1;
+      if (db === null) return -1;
+      return da - db;
+    });
+    // distanceTo depends on customerPoint which is the only relevant input besides the list
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businesses, selectedCategory, customerPoint]);
 
-  const handleBook = () => {
+  useEffect(() => {
+    if (bookingProduct) setBookingQty(1);
+  }, [bookingProduct?.id]);
+
+  const handleBook = async () => {
     if (!bookingProduct || !bookingDate || !user) return;
+    const stock = bookingProduct.quantity ?? 0;
+    if (bookingQty < 1 || bookingQty > stock) {
+      toast.error(`Choose a quantity between 1 and ${stock}.`);
+      return;
+    }
     const pickup = `${format(bookingDate, 'yyyy-MM-dd')}T${bookingTime}:00`;
-    addReservation({
-      customer_id: user.id,
-      customer_name: user.full_name,
-      business_id: bookingProduct.business_id,
-      product_id: bookingProduct.id,
-      product_name: bookingProduct.name,
-      pickup_time: pickup,
-    });
-    toast.success('Success! Your treat is booked 🎉', {
-      description: `${bookingProduct.name} — pickup at ${bookingTime} on ${format(bookingDate, 'PPP')}`,
-    });
-    setBookingProduct(null);
-    setBookingDate(undefined);
-    setBookingTime('10:00');
+    try {
+      await addReservation({
+        customer_id: user.id,
+        customer_name: user.full_name,
+        business_id: bookingProduct.business_id,
+        product_id: bookingProduct.id,
+        product_name: bookingProduct.name,
+        quantity: bookingQty,
+        pickup_time: pickup,
+      });
+      toast.success('Success! Your treat is booked 🎉', {
+        description: `${bookingQty}× ${bookingProduct.name} — pickup at ${bookingTime} on ${format(bookingDate, 'PPP')}`,
+      });
+      setBookingProduct(null);
+      setBookingDate(undefined);
+      setBookingTime('10:00');
+      setBookingQty(1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not complete reservation');
+    }
   };
 
   // Shop View
@@ -82,48 +120,71 @@ const ExplorePage = () => {
         </header>
 
         <div className="container mx-auto px-4 py-8 max-w-2xl animate-fade-in">
-          <div className="bg-gradient-to-br from-primary/10 to-secondary rounded-2xl p-8 mb-8">
-            <div className="flex items-center gap-4">
-              <Avatar className="h-16 w-16 rounded-full ring-2 ring-background shadow-sm">
-                <AvatarImage src={(activeBusiness as any).logo_url ?? undefined} alt={activeBusiness.name} />
-                <AvatarFallback className="font-display text-xl bg-primary/10 text-primary">
-                  {activeBusiness.name?.slice(0, 1).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <h1 className="text-3xl font-display font-bold text-foreground mb-1 truncate">
-                  {activeBusiness.name}
-                </h1>
-                {activeBusiness.description && (
-                  <p className="text-muted-foreground">
-                    {activeBusiness.description}
-                  </p>
-                )}
-                <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-                  <MapPin size={14} strokeWidth={2} /> Kokkola, Finland
+          <div className="bg-gradient-to-br from-primary/10 to-secondary rounded-2xl p-5 sm:p-6 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_220px] gap-4 sm:gap-5 items-stretch">
+              <div className="flex items-start gap-4 min-w-0">
+                <Avatar className="h-14 w-14 rounded-full ring-2 ring-background shadow-sm shrink-0">
+                  <AvatarImage src={(activeBusiness as any).logo_url ?? undefined} alt={activeBusiness.name} />
+                  <AvatarFallback className="font-display text-lg bg-primary/10 text-primary">
+                    {activeBusiness.name?.slice(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-2xl font-display font-bold text-foreground mb-1 truncate">
+                    {activeBusiness.name}
+                  </h1>
+                  {activeBusiness.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {activeBusiness.description}
+                    </p>
+                  )}
+                  <div className="space-y-1.5 mt-2 text-xs text-muted-foreground">
+                    <div className="flex items-start gap-1">
+                      <MapPin
+                        size={12}
+                        strokeWidth={2}
+                        className="shrink-0 mt-0.5"
+                      />
+                      <span className="break-words">
+                        {activeBusiness.address || 'Kokkola, Finland'}
+                      </span>
+                    </div>
+                    {(() => {
+                      const km = distanceTo(activeBusiness);
+                      return km !== null ? (
+                        <Badge variant="secondary" className="rounded-lg">
+                          {formatDistance(km)} from you
+                        </Badge>
+                      ) : null;
+                    })()}
+                  </div>
                 </div>
               </div>
+              {hasCoords(activeBusiness) ? (
+                <LocationMap
+                  vendor={{
+                    latitude: activeBusiness.latitude!,
+                    longitude: activeBusiness.longitude!,
+                    label: activeBusiness.name,
+                  }}
+                  customer={
+                    customerPoint
+                      ? {
+                          latitude: customerPoint.latitude,
+                          longitude: customerPoint.longitude,
+                          label: 'You',
+                        }
+                      : null
+                  }
+                  className="h-[160px] sm:h-full sm:min-h-[160px]"
+                />
+              ) : (
+                <div className="rounded-xl bg-background/60 border border-border/50 p-4 flex items-center justify-center text-xs text-muted-foreground text-center sm:h-full sm:min-h-[160px]">
+                  This shop hasn't shared a location yet.
+                </div>
+              )}
             </div>
           </div>
-
-          <Card className="rounded-2xl border-border/50 mb-8">
-            <CardHeader>
-              <CardTitle className="font-display">Location</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px] rounded-xl overflow-hidden bg-secondary/20">
-                <iframe
-                  title="Kokkola Market Square (Kauppatori)"
-                  src="https://www.google.com/maps?q=Kokkola%20Market%20Square%20(Kauppatori)&output=embed"
-                  width="100%"
-                  height="100%"
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                  className="w-full h-full border-0"
-                />
-              </div>
-            </CardContent>
-          </Card>
 
           <h2 className="text-xl font-display font-semibold mb-4 text-foreground">Available Items</h2>
           <div className="space-y-4">
@@ -141,13 +202,44 @@ const ExplorePage = () => {
         </div>
 
         {/* Booking Modal */}
-        <Dialog open={!!bookingProduct} onOpenChange={(open) => !open && setBookingProduct(null)}>
+        <Dialog open={!!bookingProduct} onOpenChange={(open) => { if (!open) { setBookingProduct(null); setBookingQty(1); } }}>
           <DialogContent className="rounded-2xl max-w-md">
             <DialogHeader>
               <DialogTitle className="font-display">Reserve {bookingProduct?.name}</DialogTitle>
-              <DialogDescription>Pick a date and time for your pickup.</DialogDescription>
+              <DialogDescription>Pick quantity, date, and time for your pickup.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="booking-qty">Quantity</Label>
+                <Input
+                  id="booking-qty"
+                  type="number"
+                  min={1}
+                  max={bookingProduct ? Math.max(1, bookingProduct.quantity ?? 0) : 1}
+                  step={1}
+                  value={bookingQty}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    if (raw === '') {
+                      setBookingQty(1);
+                      return;
+                    }
+                    const n = Number.parseInt(raw, 10);
+                    if (Number.isNaN(n)) return;
+                    const maxStock = bookingProduct
+                      ? (bookingProduct.quantity ?? 0)
+                      : 1;
+                    setBookingQty(Math.min(maxStock, Math.max(1, n)));
+                  }}
+                  className="rounded-xl"
+                />
+                {bookingProduct && (
+                  <p className="text-xs text-muted-foreground">
+                    Up to {bookingProduct.quantity ?? 0} in stock ·{' '}
+                    {(bookingProduct.price * bookingQty).toFixed(2)}€ total
+                  </p>
+                )}
+              </div>
               <div className="space-y-2">
                 <Label>Pickup Date</Label>
                 <Popover>
@@ -162,7 +254,7 @@ const ExplorePage = () => {
                       mode="single"
                       selected={bookingDate}
                       onSelect={setBookingDate}
-                      disabled={(date) => date < new Date()}
+                      disabled={date => isBefore(startOfDay(date), startOfDay(new Date()))}
                       initialFocus
                       className="p-3 pointer-events-auto"
                     />
@@ -171,13 +263,29 @@ const ExplorePage = () => {
               </div>
               <div className="space-y-2">
                 <Label>Pickup Time</Label>
-                <Input type="time" value={bookingTime} onChange={e => setBookingTime(e.target.value)} className="rounded-xl" />
+                <Input
+                  type="time"
+                  value={bookingTime}
+                  onChange={e => setBookingTime(e.target.value)}
+                  className="rounded-xl"
+                />
               </div>
               <div className="bg-secondary/50 rounded-xl p-3 flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Total</span>
-                <span className="text-lg font-bold text-primary">{bookingProduct?.price}€</span>
+                <span className="text-lg font-bold text-primary">
+                  {bookingProduct ? (bookingProduct.price * bookingQty).toFixed(2) : '0'}€
+                </span>
               </div>
-              <Button onClick={handleBook} className="w-full rounded-xl" disabled={!bookingDate}>
+              <Button
+                onClick={() => void handleBook()}
+                className="w-full rounded-xl"
+                disabled={
+                  !bookingDate ||
+                  !bookingProduct ||
+                  bookingQty < 1 ||
+                  bookingQty > (bookingProduct?.quantity ?? 0)
+                }
+              >
                 <Heart size={16} strokeWidth={2} className="mr-2" /> Confirm Reservation
               </Button>
             </div>
@@ -206,24 +314,33 @@ const ExplorePage = () => {
         <div className="container mx-auto px-4 py-8 max-w-2xl animate-fade-in">
           <h1 className="text-3xl font-display font-bold mb-6 text-foreground">{selectedCategory}</h1>
           <div className="space-y-4">
-            {categoryBusinesses.map(biz => (
-              <Card
-                key={biz.id}
-                className="rounded-2xl border-border/50 hover:shadow-md transition-all cursor-pointer"
-                onClick={() => setSelectedBusiness(biz.id)}
-              >
-                <CardContent className="p-5 flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
-                    <Coffee size={24} strokeWidth={2} className="text-primary" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-foreground">{biz.name}</h3>
-                    <p className="text-sm text-muted-foreground">{biz.description || 'Local business'}</p>
-                  </div>
-                  <Badge variant="secondary" className="rounded-lg">{products.filter(p => p.business_id === biz.id).length} items</Badge>
-                </CardContent>
-              </Card>
-            ))}
+            {categoryBusinesses.map(biz => {
+              const km = distanceTo(biz);
+              return (
+                <Card
+                  key={biz.id}
+                  className="rounded-2xl border-border/50 hover:shadow-md transition-all cursor-pointer"
+                  onClick={() => setSelectedBusiness(biz.id)}
+                >
+                  <CardContent className="p-5 flex items-center gap-4">
+                    <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
+                      <Coffee size={24} strokeWidth={2} className="text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground">{biz.name}</h3>
+                      <p className="text-sm text-muted-foreground truncate">{biz.description || 'Local business'}</p>
+                      {km !== null && (
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          <MapPin size={11} strokeWidth={2} />
+                          {formatDistance(km)} away
+                        </p>
+                      )}
+                    </div>
+                    <Badge variant="secondary" className="rounded-lg shrink-0">{products.filter(p => p.business_id === biz.id).length} items</Badge>
+                  </CardContent>
+                </Card>
+              );
+            })}
             {categoryBusinesses.length === 0 && (
               <p className="text-center text-muted-foreground py-8">No businesses in this category yet.</p>
             )}

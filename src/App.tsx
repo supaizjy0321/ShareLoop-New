@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { DataProvider } from "@/contexts/DataContext";
+import { RouterErrorBoundary } from "@/components/RouterErrorBoundary";
 import AuthPage from "./pages/AuthPage";
 import ExplorePage from "./pages/ExplorePage";
 import VendorDashboard from "./pages/VendorDashboard";
@@ -17,12 +18,23 @@ const homeForRole = (role: 'vendor' | 'customer') =>
   role === 'vendor' ? '/vendor-dashboard' : '/customer-dashboard';
 
 const AppRoutes = () => {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground text-sm">
+        Loading…
+      </div>
+    );
+  }
 
   if (!user) {
     return (
       <Routes>
-        <Route path="*" element={<AuthPage />} />
+        <Route path="/" element={<AuthPage />} />
+        {/* After vendor/customer logout, the browser can still be on /vendor-dashboard
+            or /customer-dashboard. Normalize to "/" so login + redirects behave reliably. */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
   }
@@ -57,7 +69,9 @@ const App = () => (
       <AuthProvider>
         <DataProvider>
           <BrowserRouter>
-            <AppRoutes />
+            <RouterErrorBoundary>
+              <AppRoutes />
+            </RouterErrorBoundary>
           </BrowserRouter>
         </DataProvider>
       </AuthProvider>

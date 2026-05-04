@@ -7,6 +7,9 @@ export interface User {
   email: string;
   full_name: string;
   role: 'vendor' | 'customer';
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 interface AuthContextType {
@@ -14,6 +17,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, full_name: string, role: 'vendor' | 'customer') => Promise<void>;
   logout: () => void;
+  updateAddress: (address: string | null, latitude: number | null, longitude: number | null) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -22,15 +26,20 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const fetchProfile = async (supabaseUser: SupabaseUser): Promise<User | null> => {
   const { data, error } = await supabase
     .from('profiles')
-    .select('full_name, role')
+    .select('full_name, role, address, latitude, longitude')
     .eq('id', supabaseUser.id)
     .single();
   if (error || !data) return null;
+  const role: 'vendor' | 'customer' =
+    data.role === 'vendor' ? 'vendor' : 'customer';
   return {
     id: supabaseUser.id,
     email: supabaseUser.email ?? '',
     full_name: data.full_name,
-    role: data.role as 'vendor' | 'customer',
+    role,
+    address: data.address ?? null,
+    latitude: data.latitude ?? null,
+    longitude: data.longitude ?? null,
   };
 };
 
@@ -56,12 +65,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const profile = await fetchProfile(session.user);
-        setUser(profile);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const profile = await fetchProfile(session.user);
+          setUser(profile);
+        }
+      } catch (e) {
+        console.error('Auth init failed:', e);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
     void init();
 
@@ -70,29 +84,81 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setIsLoading(false);
-    if (error) throw new Error(error.message);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) throw new Error(error.message);
+      if (data.user) {
+        const profile = await fetchProfile(data.user);
+        if (!profile) {
+          await supabase.auth.signOut();
+          throw new Error(
+            'Could not load your profile. Check your connection or try again.',
+          );
+        }
+        setUser(profile);
+      }
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const signup = useCallback(async (email: string, password: string, full_name: string, role: 'vendor' | 'customer') => {
-    setIsLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name, role } },
-    });
-    setIsLoading(false);
-    if (error) throw new Error(error.message);
-  }, []);
+  const signup = useCallback(
+    async (
+      email: string,
+      password: string,
+      full_name: string,
+      role: 'vendor' | 'customer',
+    ) => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name, role } },
+        });
+        if (error) throw new Error(error.message);
+        if (data.user && data.session) {
+          const profile = await fetchProfile(data.user);
+          if (profile) setUser(profile);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     await supabase.auth.signOut();
     setUser(null);
   }, []);
 
+  const updateAddress = useCallback(
+    async (
+      address: string | null,
+      latitude: number | null,
+      longitude: number | null,
+    ) => {
+      if (!user) throw new Error('Not authenticated');
+      const { error } = await supabase
+        .from('profiles')
+        .update({ address, latitude, longitude })
+        .eq('id', user.id);
+      if (error) throw new Error(error.message);
+      setUser(prev =>
+        prev ? { ...prev, address, latitude, longitude } : prev,
+      );
+    },
+    [user],
+  );
+
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout, isLoading }}>
+    <AuthContext.Provider
+      value={{ user, login, signup, logout, updateAddress, isLoading }}
+    >
       {children}
     </AuthContext.Provider>
   );

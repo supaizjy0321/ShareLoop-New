@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData } from '@/contexts/DataContext';
@@ -6,6 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Clock,
   CheckCircle2,
@@ -17,12 +25,63 @@ import {
   History,
   MapPin,
   XCircle,
+  Hash,
 } from 'lucide-react';
 import { format, isAfter } from 'date-fns';
+import { toast } from 'sonner';
+import {
+  AddressAutocomplete,
+  type AddressValue,
+} from '@/components/AddressAutocomplete';
 
 const CustomerDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateAddress } = useAuth();
   const { businesses, reservations } = useData();
+
+  const hasSavedAddress =
+    !!user?.address && user?.latitude != null && user?.longitude != null;
+  const savedAddressValue: AddressValue | null = hasSavedAddress
+    ? {
+        address: user!.address!,
+        latitude: user!.latitude!,
+        longitude: user!.longitude!,
+      }
+    : null;
+
+  const [addressOpen, setAddressOpen] = useState(false);
+  const [draftAddress, setDraftAddress] = useState<AddressValue | null>(
+    savedAddressValue,
+  );
+  const [savingAddress, setSavingAddress] = useState(false);
+
+  const openAddressDialog = () => {
+    setDraftAddress(savedAddressValue);
+    setAddressOpen(true);
+  };
+
+  const handleSaveAddress = async () => {
+    setSavingAddress(true);
+    try {
+      if (draftAddress) {
+        await updateAddress(
+          draftAddress.address,
+          draftAddress.latitude,
+          draftAddress.longitude,
+        );
+        toast.success('Address saved');
+      } else {
+        await updateAddress(null, null, null);
+        toast.success('Address cleared');
+      }
+      setAddressOpen(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Could not save your address',
+      );
+    } finally {
+      setSavingAddress(false);
+    }
+  };
 
   const myReservations = useMemo(
     () =>
@@ -97,6 +156,10 @@ const CustomerDashboard = () => {
             {businessName(reservation.business_id)}
           </p>
           <p className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
+            <Hash size={12} strokeWidth={2} />
+            Quantity: {reservation.quantity ?? 1}
+          </p>
+          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
             <CalendarDays size={12} strokeWidth={2} />
             {format(new Date(reservation.pickup_time), 'PPp')}
           </p>
@@ -125,6 +188,28 @@ const CustomerDashboard = () => {
             <Button
               variant="ghost"
               size="icon"
+              onClick={openAddressDialog}
+              className="rounded-xl relative"
+              aria-label={
+                hasSavedAddress ? 'Change your address' : 'Set your address'
+              }
+              title={
+                hasSavedAddress
+                  ? 'Change your address'
+                  : 'Set your address for distance to shops'
+              }
+            >
+              <MapPin size={18} strokeWidth={2} />
+              {!hasSavedAddress && (
+                <span
+                  aria-hidden
+                  className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-warning ring-2 ring-card"
+                />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={logout}
               className="rounded-xl"
             >
@@ -143,6 +228,27 @@ const CustomerDashboard = () => {
             <p className="text-muted-foreground mt-1">
               Track your reservations and discover more local businesses.
             </p>
+            {hasSavedAddress ? (
+              <button
+                type="button"
+                onClick={openAddressDialog}
+                className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <MapPin size={12} strokeWidth={2} />
+                <span className="truncate max-w-[260px] sm:max-w-md">
+                  Showing distances from {user?.address}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={openAddressDialog}
+                className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <MapPin size={12} strokeWidth={2} />
+                Set your address to see distance to shops
+              </button>
+            )}
           </div>
           <Button asChild className="rounded-xl gap-2">
             <Link to="/explore">
@@ -269,6 +375,52 @@ const CustomerDashboard = () => {
             )}
           </TabsContent>
         </Tabs>
+
+        <Dialog open={addressOpen} onOpenChange={setAddressOpen}>
+          <DialogContent className="rounded-2xl max-w-md flex max-h-[85vh] flex-col p-0 gap-0">
+            <DialogHeader className="px-6 pt-6 pb-2">
+              <DialogTitle className="font-display">Your address</DialogTitle>
+              <DialogDescription>
+                We'll use this to show how far each shop is from you. We never
+                share it with vendors.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto px-6 py-3 space-y-2">
+              <AddressAutocomplete
+                value={draftAddress}
+                onChange={setDraftAddress}
+                placeholder="Search a Finnish address…"
+              />
+              {draftAddress && (
+                <p className="text-xs text-muted-foreground">
+                  {draftAddress.latitude.toFixed(5)},{' '}
+                  {draftAddress.longitude.toFixed(5)}
+                </p>
+              )}
+            </div>
+            <DialogFooter className="border-t px-6 py-3 gap-2 sm:gap-2">
+              {hasSavedAddress && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setDraftAddress(null)}
+                  disabled={savingAddress}
+                  className="rounded-xl"
+                >
+                  Clear
+                </Button>
+              )}
+              <Button
+                type="button"
+                onClick={handleSaveAddress}
+                disabled={savingAddress}
+                className="rounded-xl"
+              >
+                {savingAddress ? 'Saving…' : 'Save'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
