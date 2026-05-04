@@ -39,6 +39,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // IMPORTANT: Do NOT make this callback async or `await` Supabase calls inside it.
+    // The auth-js library holds an internal lock while dispatching events; awaiting
+    // another Supabase query in here deadlocks signInWithPassword / signUp etc.
+    // Defer all data fetching with setTimeout(..., 0) instead.
+    // https://supabase.com/docs/reference/javascript/auth-onauthstatechange
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const supabaseUser = session.user;
+        setTimeout(() => {
+          void fetchProfile(supabaseUser).then(profile => setUser(profile));
+        }, 0);
+      } else {
+        setUser(null);
+      }
+    });
+
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -47,16 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setIsLoading(false);
     };
-    init();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const profile = await fetchProfile(session.user);
-        setUser(profile);
-      } else {
-        setUser(null);
-      }
-    });
+    void init();
 
     return () => subscription.unsubscribe();
   }, []);

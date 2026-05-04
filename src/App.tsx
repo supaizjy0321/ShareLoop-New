@@ -8,9 +8,13 @@ import { DataProvider } from "@/contexts/DataContext";
 import AuthPage from "./pages/AuthPage";
 import ExplorePage from "./pages/ExplorePage";
 import VendorDashboard from "./pages/VendorDashboard";
+import CustomerDashboard from "./pages/CustomerDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+const homeForRole = (role: 'vendor' | 'customer') =>
+  role === 'vendor' ? '/vendor-dashboard' : '/customer-dashboard';
 
 const AppRoutes = () => {
   const { user } = useAuth();
@@ -23,11 +27,23 @@ const AppRoutes = () => {
     );
   }
 
+  const home = homeForRole(user.role);
+
   return (
     <Routes>
-      <Route path="/" element={<Navigate to={user.role === 'vendor' ? '/vendor-dashboard' : '/explore'} replace />} />
-      <Route path="/explore" element={<ExplorePage />} />
-      <Route path="/vendor-dashboard" element={<VendorDashboard />} />
+      <Route path="/" element={<Navigate to={home} replace />} />
+      <Route
+        path="/explore"
+        element={user.role === 'customer' ? <ExplorePage /> : <Navigate to={home} replace />}
+      />
+      <Route
+        path="/vendor-dashboard"
+        element={user.role === 'vendor' ? <VendorDashboard /> : <Navigate to={home} replace />}
+      />
+      <Route
+        path="/customer-dashboard"
+        element={user.role === 'customer' ? <CustomerDashboard /> : <Navigate to={home} replace />}
+      />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

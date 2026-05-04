@@ -30,6 +30,8 @@ const AuthPage = () => {
     try {
       await login(loginEmail, loginPassword);
       toast.success('Welcome back!');
+      // Send the user to "/" so the role-aware redirect picks the right dashboard.
+      navigate('/', { replace: true });
     } catch (err: any) {
       toast.error(err.message || 'Login failed');
     } finally {
@@ -43,6 +45,7 @@ const AuthPage = () => {
     try {
       await signup(signupEmail, signupPassword, signupName, signupRole);
       toast.success('Account created! Welcome to ShareLoop 🎉');
+      navigate('/', { replace: true });
     } catch (err: any) {
       toast.error(err.message || 'Signup failed');
     } finally {

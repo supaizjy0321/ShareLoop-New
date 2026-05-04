@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData, type Product } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
@@ -9,18 +10,18 @@ import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Coffee, Scissors, Wrench, MapPin, Clock, CalendarIcon, ArrowLeft, ShoppingBag, LogOut, Heart } from 'lucide-react';
+import { Coffee, Scissors, Wrench, MapPin, Clock, CalendarIcon, ArrowLeft, ShoppingBag, LogOut, Heart, LayoutDashboard } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ProductCard } from '@/components/ProductCard';
 
-const categories = [
-  { name: 'Cafés & Bakeries', icon: Coffee, active: true, color: 'bg-primary' },
-  { name: 'Hair Salons', icon: Scissors, active: false, color: 'bg-muted' },
-  { name: 'Equipment Rentals', icon: Wrench, active: false, color: 'bg-muted' },
-];
+const CATEGORY_DEFINITIONS = [
+  { name: 'Cafés & Bakeries', icon: Coffee },
+  { name: 'Hair Salons', icon: Scissors },
+  { name: 'Equipment Rentals', icon: Wrench },
+] as const;
 
 const ExplorePage = () => {
   const { user, logout } = useAuth();
@@ -30,6 +31,16 @@ const ExplorePage = () => {
   const [bookingProduct, setBookingProduct] = useState<Product | null>(null);
   const [bookingDate, setBookingDate] = useState<Date>();
   const [bookingTime, setBookingTime] = useState('10:00');
+
+  // Categories are "active" only when a vendor has actually added a business in them.
+  const categories = useMemo(
+    () =>
+      CATEGORY_DEFINITIONS.map(c => {
+        const count = businesses.filter(b => b.category === c.name).length;
+        return { ...c, count, active: count > 0 };
+      }),
+    [businesses],
+  );
 
   const activeBusiness = businesses.find(b => b.id === selectedBusiness);
   const businessProducts = products.filter(p => p.business_id === selectedBusiness);
@@ -230,6 +241,13 @@ const ExplorePage = () => {
           <span className="font-display text-xl font-bold text-foreground">ShareLoop</span>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground hidden sm:block">Hi, {user?.full_name} 👋</span>
+            {user?.role === 'customer' && (
+              <Button asChild variant="ghost" size="icon" className="rounded-xl">
+                <Link to="/customer-dashboard" aria-label="My dashboard">
+                  <LayoutDashboard size={18} strokeWidth={2} />
+                </Link>
+              </Button>
+            )}
             <Button variant="ghost" size="icon" onClick={logout} className="rounded-xl">
               <LogOut size={18} strokeWidth={2} />
             </Button>
@@ -270,6 +288,11 @@ const ExplorePage = () => {
                     Coming Soon
                   </Badge>
                 )}
+                {cat.active && (
+                  <Badge className="absolute top-3 right-3 bg-primary/10 text-primary border-0 rounded-lg text-xs">
+                    {cat.count} {cat.count === 1 ? 'shop' : 'shops'}
+                  </Badge>
+                )}
                 <CardContent className="p-6 text-center">
                   <div className={cn(
                     "w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3",
@@ -278,6 +301,9 @@ const ExplorePage = () => {
                     <Icon size={28} strokeWidth={2} className={cat.active ? "text-primary" : "text-muted-foreground"} />
                   </div>
                   <h3 className="font-semibold text-foreground">{cat.name}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {cat.active ? 'Browse local shops' : 'No shops yet'}
+                  </p>
                 </CardContent>
               </Card>
             );
